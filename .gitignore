@@ -5,3 +5,4 @@ mlruns/
 mlartifacts/
 *.db
 .DS_Store
+.vscode/
