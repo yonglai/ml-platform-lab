@@ -3,14 +3,14 @@
 Exit code 0 = promoted (or nothing to do), 1 = rejected. CI uses the exit code.
 Usage:  uv run python app/promote.py [--min-gain 0.0]
 """
+
 import argparse
 import sys
 
 import mlflow
+from common import MODEL_NAME, TRACKING_URI
 from mlflow import MlflowClient
 from mlflow.exceptions import MlflowException
-
-from common import MODEL_NAME, TRACKING_URI
 
 METRIC = "roc_auc"
 
@@ -21,7 +21,12 @@ def auc_of(client: MlflowClient, version) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--min-gain", type=float, default=0.0, help="required roc_auc improvement over prod")
+    ap.add_argument(
+        "--min-gain",
+        type=float,
+        default=0.0,
+        help="required roc_auc improvement over prod",
+    )
     args = ap.parse_args()
 
     mlflow.set_tracking_uri(TRACKING_URI)
@@ -44,9 +49,13 @@ def main() -> int:
     if prod is None:
         print(f"no prod yet: promoting v{cand.version} (roc_auc={cand_auc:.4f})")
     elif cand_auc >= prod_auc + args.min_gain:
-        print(f"promoting v{cand.version} ({cand_auc:.4f}) over prod v{prod.version} ({prod_auc:.4f})")
+        print(
+            f"promoting v{cand.version} ({cand_auc:.4f}) over prod v{prod.version} ({prod_auc:.4f})"
+        )
     else:
-        print(f"REJECTED: v{cand.version} ({cand_auc:.4f}) does not beat prod v{prod.version} ({prod_auc:.4f}) by {args.min_gain}")
+        print(
+            f"REJECTED: v{cand.version} ({cand_auc:.4f}) does not beat prod v{prod.version} ({prod_auc:.4f}) by {args.min_gain}"
+        )
         return 1
 
     client.set_registered_model_alias(MODEL_NAME, "prod", cand.version)

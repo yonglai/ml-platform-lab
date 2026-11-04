@@ -2,6 +2,7 @@
 
 Usage:  uv run python app/smoke.py --url http://localhost:5001 -n 200
 """
+
 import argparse
 import statistics
 import time
@@ -26,4 +27,6 @@ for _ in range(args.n):
 lat.sort()
 q = lambda p: lat[min(len(lat) - 1, int(p * len(lat)))]
 print(f"last response: {r.json()}")
-print(f"n={args.n}  p50={q(.50):.1f} ms  p95={q(.95):.1f} ms  p99={q(.99):.1f} ms  mean={statistics.mean(lat):.1f} ms")
+print(
+    f"n={args.n}  p50={q(0.50):.1f} ms  p95={q(0.95):.1f} ms  p99={q(0.99):.1f} ms  mean={statistics.mean(lat):.1f} ms"
+)

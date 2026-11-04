@@ -1,4 +1,5 @@
 """Shared settings. Everything is overridable by environment variable."""
+
 import os
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "propensity-model")
