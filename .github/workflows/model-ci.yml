@@ -1,0 +1,21 @@
+# Model CI: no cluster needed. Spins up a local sqlite MLflow, trains, and runs the promotion gate.
+name: model-ci
+on:
+  push:
+    paths: ["app/**", "pyproject.toml", ".github/workflows/model-ci.yml"]
+  pull_request:
+jobs:
+  train-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Train baseline and promote it (no prod yet)
+        run: |
+          uv run python app/train.py --n-estimators 50 --max-depth 4
+          uv run python app/promote.py
+      - name: Train a challenger and run the gate
+        run: |
+          uv run python app/train.py --n-estimators 200 --max-depth 8
+          uv run python app/promote.py

@@ -1,0 +1,12 @@
+[project]
+name = "ml-platform-lab"
+version = "0.1.0"
+description = "Thin-slice ML platform on k3s: MLflow registry, gated promotion, serving, monitoring, RBAC"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlflow>=3.0",
+    "scikit-learn>=1.5",
+    "pandas>=2.2",
+    "requests>=2.32",
+]

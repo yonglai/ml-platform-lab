@@ -1,0 +1,7 @@
+__pycache__/
+*.py[oc]
+.venv/
+mlruns/
+mlartifacts/
+*.db
+.DS_Store
