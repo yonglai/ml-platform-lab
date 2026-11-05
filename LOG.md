@@ -67,4 +67,44 @@ Built `k8s/20-mlflow.yaml`: PVC for artifacts, Deployment (`python:3.12-slim`, `
 
 **Done**: from a pod in the cluster, `http://mlflow:5000` answers with 200 on a non-exempt API path and rejects a bad Host with 403; the pod stays at `RESTARTS 0` at 637Mi.
 
+## 2026-11-05 - Step 3, train and register on the cluster
+
+Ran `app/train.py` twice against the in-cluster MLflow (`MLFLOW_TRACKING_URI=http://localhost:5000` through `kubectl port-forward svc/mlflow 5000:5000` on g1). Metadata goes to Postgres, model files go to the artifacts PVC through the server (`--serve-artifacts`).
+
+**Results**
+
+| Version | Params | roc_auc | Run time | Alias |
+|---|---|---|---|---|
+| v1 | n_estimators=50, max_depth=4 | 0.9068 | 1.2 s | none |
+| v2 | n_estimators=200, max_depth=8 | 0.9575 | 2.1 s | `candidate` |
+
+- The metrics are identical to the earlier local sqlite run (0.9068 and 0.9575): same data and seed give the same result on the cluster.
+- Setting an alias on a new version moves it: `candidate` went to v2 and v1 lost it.
+- Files on the volume: `/mlartifacts/1/models/m-<id>/artifacts`, one directory per logged model (experiment id 1). MLflow 3.x stores a model as its own entity under `models/`, not inside the run folder.
+- My machine never mounted the PVC: it uploaded the model over HTTP and the server wrote it to `/mlartifacts`.
+- Persistence test: `kubectl delete pod` on the MLflow pod. After the new pod came up, v1, v2, the alias `candidate -> v2` and both model directories were all still there. The records live in Postgres and the files on the PVC, neither of which is inside the pod.
+
+**Predictions vs results**
+
+- Where do the model files live, and how did my machine upload them without mounting the PVC? Predicted: ___. Actual: on the PVC under `/mlartifacts`, uploaded over HTTP through the server.
+- Which version gets `candidate`, and what happens to v1? Predicted: ___. Actual: v2 gets it and v1 loses it.
+- Do versions and files survive deleting the MLflow pod? Predicted: ___. Actual: yes, everything survived.
+
+**What went wrong**
+
+1. My first registry query printed nothing and logged "Creating initial MLflow database tables". `MLFLOW_TRACKING_URI` was unset in that terminal, so MLflow silently created a local DB and found no versions. Environment variables are per shell.
+2. `search_model_versions` returned `aliases=[]` for every version, even though `candidate -> v2` was set. That call does not fill in aliases. Use `get_registered_model(name).aliases` (a map of alias to version) or `get_model_version`.
+3. The UI seemed to have no model versions: the default GenAI view of an experiment does not show them. The **Model training** toggle (top left of the sidebar) has Models.
+4. Reaching the UI from my Mac: `localhost:5000` is also used by AirPlay Receiver (`ControlCe` listening on `*:5000`). While my `ssh -L` tunnel was up, the browser reached MLflow; when the tunnel closed, `localhost:5000` fell through to AirPlay and looked like MLflow was down. `lsof -nP -iTCP:5000 -sTCP:LISTEN` showed who owned the port. VS Code's Ports tab only had 8888 ("Statically Forwarded"), so VS Code was not forwarding 5000.
+
+**Lessons**
+
+1. Check `echo $MLFLOW_TRACKING_URI` before trusting an empty result; an unset tracking URI fails silently instead of loudly.
+2. Aliases are a model-level map, and a list call may not populate them. Read them from the registered model.
+3. A tunnel from the Mac lives only as long as its ssh session. Use a free local port and keep-alives: `ssh -N -o ServerAliveInterval=30 -L 5050:localhost:5000 alienware`, then open `localhost:5050`.
+4. Three hops (browser, ssh tunnel, `kubectl port-forward`, pod) mean three places for the UI to break. Test each from the far end: `curl localhost:5000/health` on g1 first, then on the Mac.
+5. Reproducible training (fixed seed and data) gives identical metrics across environments, which is what makes a promotion gate meaningful.
+
+**Done**: two versions registered through the cluster, `candidate` on v2, and everything survived deleting the MLflow pod.
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
