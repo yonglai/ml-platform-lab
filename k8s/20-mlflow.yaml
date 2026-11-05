@@ -45,6 +45,9 @@ spec:
           envFrom:
             - secretRef:
                 name: postgres-credentials
+          env:
+            - name: MLFLOW_SERVER_ENABLE_JOB_EXECUTION
+              value: "false"
           volumeMounts:
             - name: artifacts
               mountPath: /mlartifacts
