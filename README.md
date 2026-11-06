@@ -20,11 +20,11 @@ A thin-slice ML platform on a single-node k3s cluster, built to practice the pie
 ## Status
 | Step | What | State |
 |---|---|---|
-| 0 | Pre-flight checks | todo |
-| 1 | Namespace + Postgres | todo |
-| 2 | MLflow server | todo |
-| 3 | Train + register against cluster | todo |
-| 4 | Promotion gate + model CI | scripts done and tested locally |
+| 0 | Pre-flight checks | done |
+| 1 | Namespace + Postgres | done |
+| 2 | MLflow server | done |
+| 3 | Train + register against cluster | done |
+| 4 | Promotion gate + model CI | scripts tested locally; cluster run and CI gate case next |
 | 5 | Serving from `@prod` | todo |
 | 6 | Prometheus + Grafana + SLO | todo |
 | 7 | RBAC (+ audit log stretch) | todo |
@@ -41,3 +41,9 @@ uv run python app/train.py --n-estimators 200 --max-depth 8
 uv run python app/promote.py          # promoted only if roc_auc is higher; exit 1 otherwise
 ```
 Against the cluster, set `MLFLOW_TRACKING_URI=http://localhost:5000` while `kubectl port-forward` is running.
+
+## Inspect the registry
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5000   # per shell; unset means a silent local database
+uv run python app/show_registry.py                 # versions, aliases, roc_auc
+```
