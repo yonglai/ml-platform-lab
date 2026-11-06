@@ -19,3 +19,10 @@ jobs:
         run: |
           uv run python app/train.py --n-estimators 200 --max-depth 8
           uv run python app/promote.py
+      - name: Gate rejects a worse model
+        run: |
+          uv run python app/train.py --n-estimators 3 --max-depth 2
+          if uv run python app/promote.py; then
+            echo "promotion gate should have rejected the worse model"
+            exit 1
+          fi

@@ -107,4 +107,45 @@ Ran `app/train.py` twice against the in-cluster MLflow (`MLFLOW_TRACKING_URI=htt
 
 **Done**: two versions registered through the cluster, `candidate` on v2, and everything survived deleting the MLflow pod.
 
+## 2026-11-05 - Step 4, promotion gate
+
+Ran `app/promote.py` against the cluster registry (`MLFLOW_TRACKING_URI=http://localhost:5000`). The gate compares the `roc_auc` of the version with alias `candidate` to the current `prod` and moves `prod` only if the candidate is at least as good; otherwise it exits 1. `app/show_registry.py` (new) prints each version with its aliases.
+
+**What happened, in order**
+
+| Action | Output | Registry afterwards |
+|---|---|---|
+| `promote.py` with no `prod` | `no prod yet: promoting v2 (roc_auc=0.9575)`, exit 0 | v2: candidate, prod |
+| `train.py --n-estimators 3 --max-depth 2` | v3, roc_auc 0.8433 | v3 gets `candidate` |
+| `promote.py` | `REJECTED: v3 (0.8433) does not beat prod v2 (0.9575) by 0.0`, exit 1 | v2: prod; v3: candidate |
+| `train.py --n-estimators 300 --max-depth 10` | v4, roc_auc 0.9676 | v4 gets `candidate` |
+| `promote.py` | `promoting v4 (0.9676) over prod v2 (0.9575)`, exit 0 | v4: candidate, prod; v1-v3 no aliases |
+
+Rollback check (move `prod` back to v2 with `set_registered_model_alias`, then forward to v4 again): result ___ (fill in).
+
+**Predictions vs results**
+
+- First `promote.py` with no `prod`: which version becomes `prod`? Predicted: v2. Actual: right.
+- Worse model (3 trees, depth 2): message, exit code, which version is `prod`? Predicted: REJECTED, exit 1, `prod` stays v2. Actual: right.
+- After the rejection, where does `candidate` point, and is that good design? Predicted: still v2, good design. Actual: wrong. `candidate` pointed at v3, the rejected model. `train.py` moves `candidate` to every new version it registers, and `promote.py` never changes it.
+- Does promotion change anything on the PVC? Predicted: database only, not `/mlartifacts`. Actual: not measured yet; compare `find /mlartifacts` before and after a `promote.py` run.
+
+**What went wrong**
+
+1. In a new shell, `show_registry.py` printed `tracking uri: sqlite:///mlflow-local.db` and showed v1 with `candidate` and `prod`. `MLFLOW_TRACKING_URI` was unset, so it read the local file from my pre-flight sanity check, not the cluster. I had not run `promote.py` yet, so nothing was changed there. After `export MLFLOW_TRACKING_URI=http://localhost:5000` it showed the real v1 and v2. Second time this variable bit me.
+2. Pasting a heredoc with two leading spaces left the shell at a `>` prompt: the closing `EOF` must start at column 0. Ctrl+C cancels it; a one-line `python -c '...'` avoids the problem.
+
+**Lessons**
+
+1. A script that prints which registry it is connected to turns a silent mistake into a visible one on the first line.
+2. `candidate` means "the most recently trained version". Training moves it; the gate only reads it. A rejected model therefore stays labeled `candidate` and nothing records that it failed.
+3. Aliases are labels in the database. Promotion and rollback only move a label; the model files stay on the PVC, so rolling back to v2 is one `set_registered_model_alias` call.
+4. The gate's exit code (0 promoted, 1 rejected) is what CI uses. Added a step to `.github/workflows/model-ci.yml` that trains a worse model and fails the job if `promote.py` accepts it. Simulated the same sequence locally on a fresh sqlite registry (baseline promoted, challenger promoted, worse model rejected). Not run on GitHub yet.
+5. Training with fixed seeds is deterministic: v3 scored 0.8433 on the cluster, exactly as in the local test.
+6. Two warnings in the training log: "has no artifacts at artifact path 'model', registering model based on models:/m-..." (MLflow 3.x stores a model as its own logged-model entity and the registration falls back to it; harmless, but `train.py` could register the URI that `log_model` returns), and "Exported 91 dependencies via uv" (the model's recorded requirements are my whole `uv.lock`). The second matters for Step 5: the serving pod must install a scikit-learn version compatible with the one the model was trained with.
+
+**Open question for the reference architecture doc:** what should happen to a rejected candidate? Options: tag the version `gate=rejected` with the reason and both `roc_auc` values; remove the `candidate` alias on rejection; or leave it and document the meaning.
+
+**Done**: the gate behaved correctly in both directions on the cluster (promote on improvement, reject on regression with exit 1), and `prod` ended on v4.
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
