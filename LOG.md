@@ -166,16 +166,16 @@ Built `k8s/30-serving.yaml`: a Deployment and a ClusterIP Service (port 5001) th
 - Memory of the serving pod (one worker)? Predicted: about 900Mi, roughly 300 Mi per worker. Actual: 454Mi (`kubectl top pod`; at the same time mlflow 666Mi, postgres 76Mi). Too high a guess: per heavy process it is about 225Mi, not 300.
 - Will the Host header check allow the model fetch from `mlflow:5000`? Predicted: yes. Actual: yes. No 403 in the serving log; the model downloaded from `mlflow:5000` and Uvicorn started.
 
-**Baseline latency** (`app/smoke.py -n 200` through `kubectl port-forward svc/serving 5001:5001`): p50 15.9 ms, p95 17.5 ms, p99 25.5 ms (mean 16.1 ms). This overstates in-cluster latency: the same script against a local server gave about 5 ms, so `kubectl port-forward` adds roughly 10 ms. Redo from a pod inside the cluster before using it as the SLO baseline.
+**Baseline latency** (`app/smoke.py -n 200` through `kubectl port-forward svc/serving 5001:5001`): p50 15.9 ms, p95 17.5 ms, p99 25.5 ms (mean 16.1 ms). I first assumed `kubectl port-forward` inflates this, because the same script against a local server gave about 5 ms (I did not record where or how that was run, so it is not comparable). The in-cluster prober (Step 6c) later showed that was wrong: see the correction there. Redo from a pod inside the cluster before using it as the SLO baseline.
 
 **What went wrong**: nothing failed; the first `kubectl apply` came up Ready.
 
 **Lessons**
 
 1. Memory is roughly the number of heavy Python processes times about 225Mi each: mlflow 666Mi / 3 processes (parent + 2 workers), serving 454Mi / 2 (parent + 1 worker). The model itself is a few MB, so the imported libraries dominate; for an LLM the weights would dominate instead. (The process count for serving is my expectation, not yet checked with the `/proc` listing.)
-2. `kubectl port-forward` is not a valid latency baseline: it tunnels through the API server and adds latency.
+2. Measure latency from where the client really is. `kubectl port-forward` is a poor baseline in principle, but when I measured, it added little (see Step 6c); the earlier 5 ms local number was not recorded well enough to compare.
 3. The pod serves the version `prod` pointed to when it started (v2), and the log line `resolved propensity-model@prod -> v2` records it.
-4. `mlflow` (3 restarts) and `postgres-0` (4 restarts) both show their last restart about 8 hours ago, at the same time. Probably a host event (sleep, reboot or k3s restart); not confirmed. Both recovered on their own, and Postgres kept its data.
+4. `mlflow` (3 restarts) and `postgres-0` (4 restarts) both show their last restart about 8 hours ago, at the same time. Probably a host event (sleep, reboot or k3s restart); not confirmed at the time, later shown to be host reboots (see Step 6c). Both recovered on their own, and Postgres kept its data.
 
 **Open questions for the reference architecture doc**
 
@@ -229,8 +229,9 @@ Sub-steps: 6a check the host, 6b Prometheus, 6c prober, 6d Grafana dashboard, 6e
 **Predictions**
 
 - Prometheus with no PVC, pod deleted: does history survive? Predicted: yes. Actual: no. With no volume, the 1-hour graph had no points before the new process started (process age 8.5 min while the Helm install was 80 min old). After switching on a 5Gi `local-path` volume and deleting the pod again, history survived (see 6b below).
-- Prober p99 from inside the cluster vs 25.5 ms through `port-forward`? Predicted: below, because there is no `port-forward` hop. Actual: ___
+- Prober p99 from inside the cluster vs 25.5 ms through `port-forward`? Predicted: below, because there is no `port-forward` hop. Actual: below: p99 about 20 ms. But the median was not lower (p50 17.5 ms in-cluster vs 15.9 ms through `port-forward`), so the hop itself cost almost nothing; the tail was tighter.
 - Memory added by Prometheus plus Grafana? Predicted: under 500Mi. Actual: ___
+- During `rollout restart` of `serving`, what do the prober's error rate and p99 show? Predicted: error rate 0.017 (the restart takes about 50 s, so about one failure per second); p99: about 60 slow requests in the 5-minute window, value unknown. Actual: ___
 
 **6b, Prometheus installed** (Helm chart `prometheus-community/prometheus`, values in `k8s/helm/prometheus-values.yaml`; Alertmanager, pushgateway and node-exporter off). All 8 targets `UP`: API server, kubelet, cAdvisor, Traefik, kube-state-metrics (two ports), CoreDNS, Prometheus itself. cAdvisor memory matches `kubectl top`: mlflow 657Mi, serving 464Mi, postgres 75Mi.
 
@@ -239,5 +240,16 @@ Sub-steps: 6a check the host, 6b Prometheus, 6c prober, 6d Grafana dashboard, 6e
 - The `up` graph shows no visible gap even though scraping paused for about 40 s: instances keep their last value for up to 5 minutes (the lookback window) unless a staleness marker is written. A short outage can hide in a graph; the process-age drop is the reliable restart signal.
 - Your ml-platform pods are not scraped yet: the `kubernetes-pods` job only finds pods with the annotation `prometheus.io/scrape: "true"`. The prober (6c) carries it.
 - `kubectl get pods,pvc -w` fails: `-w` accepts only one resource type.
+
+**6c, prober** (`app/prober.py`, `k8s/40-prober.yaml`; the script reaches the pod through a ConfigMap created from the file, so the code exists once). The `kubernetes-pods` job now shows 2 targets, Traefik and the prober (`ml-platform`), both `UP`.
+
+- In-cluster latency, last 5 minutes: **p50 about 17.5 ms, p99 about 20.0 ms** (`histogram_quantile` over `prober_request_duration_seconds_bucket`). These are estimates: Prometheus interpolates inside a bucket and my buckets are 15, 20 and 25 ms wide. The hard fact is that p99 falls in the 15-20 ms bucket, so at least 99% of requests took 20 ms or less. For finer numbers I would add buckets between 15 and 20 ms.
+- Correction to my Step 5 note: I believed `port-forward` added about 10 ms. In-cluster p50 (17.5 ms) is slightly higher than through `port-forward` (15.9 ms), so the network hop is small. Most of the time is the model itself: see the timing check below. The prober also pays for a DNS lookup and a new connection on every request.
+- Where the time goes (timed inside the serving pod, 100 `predict` calls on one row, no HTTP): scikit-learn alone **10.3 ms**, through MLflow `pyfunc` **11.1 ms**. So about 11 of the 17.5 ms p50 is the model; the other roughly 6 ms is the web server, JSON and DataFrame handling, DNS and a new connection per request. A random forest calls each tree separately, with fixed overhead per tree, so a single row costs about 50 microseconds per tree (if v2 has 200 trees; check `n_estimators` on its run). Levers: fewer or shallower trees, batching rows, a faster runtime such as ONNX.
+- MLflow warned that the serving pod's libraries differ slightly from the training environment (fastapi, pydantic, click, cachetools and others are newer by one patch release). I pinned only 6 top-level packages, so their dependencies float to whatever is newest when the pod starts. scikit-learn, numpy and pandas match, so predictions are fine, but two pods started on different days can differ. Fix for the reference doc: build an image from `uv.lock` once and deploy that.
+- Lesson: a number I had only reasoned about (the 10 ms) turned out wrong once I measured. Write the measurement, not the explanation.
+- `ruff` flagged `except Exception` (BLE001). Narrowed to `(OSError, http.client.HTTPException)`, which covers what urllib raises.
+- Typing `-n platform` instead of `-n ml-platform` made `get pods -w` hang silently: a missing namespace is not an error, just an empty list.
+- Restart cause for `mlflow` and `postgres-0`: both containers' last state is `terminated`, exit code 255, reason `Unknown`, with the same finish time (13:05:41Z = 08:05 local). `uptime` at 12:14 said `up 4:09`, so the host booted at about 08:05. Exit 255 with reason `Unknown` and an identical timestamp on different pods is what a whole-machine restart looks like, not an application crash (an OOM kill would say `OOMKilled`). Both pods came back on their own and Postgres kept its data (the PVC). Explained: I shut the machine down every night. `journalctl --list-boots` shows one boot per day (this one 08:05:30, previous one ended 21:46:35 the night before). So these are not failures: every morning k3s starts and brings the pods back. Not explained: why `serving`'s restart count did not change at the same time. Consequences for the SLO and the reference doc: the lab host is off about 12 hours a night, so an SLO can only apply while it is running; a single node has no redundancy against a reboot; Prometheus has no data for the hours the machine is off; and `serving` needs the network at boot because it runs `pip install` on start. `loadgen` (a bare pod with no controller) has been left in `Unknown` since then; delete it.
 
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->

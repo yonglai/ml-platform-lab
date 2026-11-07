@@ -1,0 +1,26 @@
+# Values for grafana-community/grafana (the maintained chart: the old grafana/grafana repo
+# stopped at 10.5.15 / Grafana 12.3.1), release name "grafana", namespace "monitoring".
+# Lab only: the admin password is in this file. Real setups use a Secret or an SSO login.
+adminUser: admin
+adminPassword: change-me-lab-only
+
+persistence:
+  enabled: true      # dashboards you build in the UI survive a pod restart
+  size: 1Gi
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc.cluster.local
+        isDefault: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
