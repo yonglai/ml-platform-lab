@@ -228,8 +228,16 @@ Sub-steps: 6a check the host, 6b Prometheus, 6c prober, 6d Grafana dashboard, 6e
 
 **Predictions**
 
-- Prometheus with no PVC, pod deleted: does history survive? Predicted: yes. Actual: ___
+- Prometheus with no PVC, pod deleted: does history survive? Predicted: yes. Actual: no. With no volume, the 1-hour graph had no points before the new process started (process age 8.5 min while the Helm install was 80 min old). After switching on a 5Gi `local-path` volume and deleting the pod again, history survived (see 6b below).
 - Prober p99 from inside the cluster vs 25.5 ms through `port-forward`? Predicted: below, because there is no `port-forward` hop. Actual: ___
 - Memory added by Prometheus plus Grafana? Predicted: under 500Mi. Actual: ___
+
+**6b, Prometheus installed** (Helm chart `prometheus-community/prometheus`, values in `k8s/helm/prometheus-values.yaml`; Alertmanager, pushgateway and node-exporter off). All 8 targets `UP`: API server, kubelet, cAdvisor, Traefik, kube-state-metrics (two ports), CoreDNS, Prometheus itself. cAdvisor memory matches `kubectl top`: mlflow 657Mi, serving 464Mi, postgres 75Mi.
+
+- First install had no volume (`persistentVolume.enabled: false`) to test the prediction: history was lost when the pod was replaced. Then `helm upgrade` with `enabled: true` (5Gi, `local-path`, PVC `Bound`).
+- Persistence test: let it run about 10 minutes, deleted the server pod. The `up` series is continuous across the restart, and the process-age query (`(time() - process_start_time_seconds{job="prometheus"}) / 60`) climbs to about 10.8 minutes and drops back to about 0.3 at the restart. So the process restarted and the data survived.
+- The `up` graph shows no visible gap even though scraping paused for about 40 s: instances keep their last value for up to 5 minutes (the lookback window) unless a staleness marker is written. A short outage can hide in a graph; the process-age drop is the reliable restart signal.
+- Your ml-platform pods are not scraped yet: the `kubernetes-pods` job only finds pods with the annotation `prometheus.io/scrape: "true"`. The prober (6c) carries it.
+- `kubectl get pods,pvc -w` fails: `-w` accepts only one resource type.
 
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->

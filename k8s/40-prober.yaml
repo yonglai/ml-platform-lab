@@ -1,0 +1,52 @@
+# Prober: sends one request per second to the model from inside the cluster and exposes
+# latency and success metrics for Prometheus. The code lives in app/prober.py (single source);
+# it reaches the pod through a ConfigMap created from that file, NOT written in this manifest.
+#
+# Deploy (from the repo root):
+#   kubectl -n ml-platform create configmap prober-script --from-file=app/prober.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f k8s/40-prober.yaml
+# After editing app/prober.py, repeat the first command, then:
+#   kubectl -n ml-platform rollout restart deploy/prober
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prober
+  namespace: ml-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prober
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prober
+      annotations:
+        # Prometheus' "kubernetes-pods" job scrapes pods that carry these annotations.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: prober
+          image: python:3.12-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - pip install --no-cache-dir prometheus-client==0.22.1 &&
+              exec python /app/prober.py --url http://serving:5001
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: prober-script
