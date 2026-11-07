@@ -1,0 +1,70 @@
+# RBAC for the ml-platform namespace: two identities with different powers.
+#   ml-reader   can look at pods, services and deployments, nothing else
+#   ml-deployer can do the same, and also change deployments (restart, update)
+# Nobody gets Secrets, delete, or access outside this namespace. RBAC has no "deny" rules:
+# anything not listed here is refused.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ml-reader
+  namespace: ml-platform
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ml-deployer
+  namespace: ml-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ml-reader
+  namespace: ml-platform
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ml-deployer
+  namespace: ml-platform
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]   # `kubectl rollout restart` is a patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ml-reader
+  namespace: ml-platform
+subjects:
+  - kind: ServiceAccount
+    name: ml-reader
+    namespace: ml-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ml-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ml-deployer
+  namespace: ml-platform
+subjects:
+  - kind: ServiceAccount
+    name: ml-deployer
+    namespace: ml-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ml-deployer

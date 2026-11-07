@@ -272,4 +272,10 @@ Sub-steps: 6a check the host, 6b Prometheus, 6c prober, 6d Grafana dashboard, 6e
 - Pods Ready panel: after switching it to instant queries a missing pod vanished instead of showing 0. Replaced it with `kube_deployment_status_replicas_available` (stays at 0 while the Deployment exists) and `kube_statefulset_status_replicas_ready` for Postgres; dashboard version 3.
 - Not observable: a pod that does not exist has no pod-level metrics. Alert on the Deployment, not on the pod.
 
+## 2026-11-07 - Step 7, RBAC
+
+Goal: two identities in `ml-platform` with different powers: `ml-reader` (look at pods, services, deployments) and `ml-deployer` (the same, plus patch and update deployments, which is what `rollout restart` needs). Manifest: `k8s/50-rbac.yaml`.
+
+**Prediction**: a service account with only read access to pods tries to delete a pod. Predicted: denied with an "unauthorized" error. Correction: Kubernetes answers 403 Forbidden (known identity, not allowed), not 401 Unauthorized (unknown identity).
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
