@@ -278,4 +278,31 @@ Goal: two identities in `ml-platform` with different powers: `ml-reader` (look a
 
 **Prediction**: a service account with only read access to pods tries to delete a pod. Predicted: denied with an "unauthorized" error. Correction: Kubernetes answers 403 Forbidden (known identity, not allowed), not 401 Unauthorized (unknown identity).
 
+**More predictions** (all three correct): `ml-deployer` cannot read Secrets (no rule mentions them): no. `ml-reader` cannot list pods in `monitoring` (a Role only covers its own namespace): no. `ml-deployer` can run `rollout restart` (it is a patch on the Deployment): yes.
+
+**Results** (`kubectl auth can-i ... --as=system:serviceaccount:ml-platform:<name>`):
+
+| Check | Result |
+|---|---|
+| reader: get pods | yes |
+| reader: delete pods | no |
+| reader: patch deployments | no |
+| deployer: patch deployments | yes |
+| deployer: delete pods | no |
+| deployer: get secrets | no |
+| reader: get pods in `monitoring` | no |
+
+The real refusal: `Error from server (Forbidden): pods "prober-..." is forbidden: User "system:serviceaccount:ml-platform:ml-reader" cannot delete resource "pods" in API group "" in the namespace "ml-platform"`. `rollout restart deploy/prober` as `ml-deployer` worked.
+
+Lessons:
+
+1. RBAC only adds permissions; with no matching rule the answer is no. There are no deny rules, so a missing line is the control.
+2. 401 Unauthorized means the identity is unknown; 403 Forbidden means known but not allowed.
+3. A Role is limited to one namespace, so access elsewhere needs a separate Role and binding (or a ClusterRole).
+4. `kubectl auth can-i --as=...` checks what the API server would allow, without doing it. It needs admin rights to impersonate, so it tests the rules, not a real token.
+5. `pods/log` is a separate resource from `pods`. Predicted no, correct: `ml-reader` got `Forbidden: cannot get resource "pods/log"`. A "read-only" account that cannot read logs cannot debug anything, so whether to grant it is a decision (logs can contain secrets).
+
+**7b, NetworkPolicy** (`k8s/60-networkpolicy.yaml`): RBAC controls who can use the Kubernetes API; it does not stop pods talking to each other. Test before any policy: from the prober pod, `socket.create_connection(('postgres',5432),3)` printed `connected`, so any pod can reach Postgres. Next: apply a policy allowing only `mlflow` pods, repeat the test, and confirm k3s actually enforces it (PLAN.md warned it might not).
+
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
