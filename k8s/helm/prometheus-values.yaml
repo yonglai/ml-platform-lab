@@ -28,3 +28,17 @@ server:
       memory: 256Mi
     limits:
       memory: 1Gi
+
+# One alert rule (Alertmanager is off, so it shows on the Prometheus Alerts page, not as a notification).
+serverFiles:
+  alerting_rules.yml:
+    groups:
+      - name: ml-platform
+        rules:
+          - alert: ServingUnavailable
+            expr: kube_deployment_status_replicas_available{namespace="ml-platform", deployment="serving"} < 1
+            for: 2m
+            labels:
+              severity: page
+            annotations:
+              summary: "No serving pod has been Ready for 2 minutes"
