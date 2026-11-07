@@ -1,0 +1,28 @@
+# Kubernetes API audit policy. The first rule that matches a request decides what is logged.
+#   None     = not recorded
+#   Metadata = who, what, when, result; NOT the request or response body
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: ["RequestReceived"]    # one record per request, written when it completes
+rules:
+  # Health checks and metrics scraping: pure noise.
+  - level: None
+    nonResourceURLs: ["/healthz*", "/livez*", "/readyz*", "/version", "/metrics"]
+  # Very chatty objects that say little about who changed what.
+  - level: None
+    resources:
+      - group: ""
+        resources: ["events"]
+      - group: "coordination.k8s.io"
+        resources: ["leases"]
+  # Secrets and ConfigMaps: record WHO touched them (reads included) but never the content,
+  # otherwise the audit log would itself leak the passwords.
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets", "configmaps", "serviceaccounts/token"]
+  # Routine reads of everything else.
+  - level: None
+    verbs: ["get", "list", "watch"]
+  # Everything left: create, update, patch, delete, impersonation, failed requests.
+  - level: Metadata

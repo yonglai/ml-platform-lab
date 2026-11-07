@@ -302,7 +302,23 @@ Lessons:
 4. `kubectl auth can-i --as=...` checks what the API server would allow, without doing it. It needs admin rights to impersonate, so it tests the rules, not a real token.
 5. `pods/log` is a separate resource from `pods`. Predicted no, correct: `ml-reader` got `Forbidden: cannot get resource "pods/log"`. A "read-only" account that cannot read logs cannot debug anything, so whether to grant it is a decision (logs can contain secrets).
 
-**7b, NetworkPolicy** (`k8s/60-networkpolicy.yaml`): RBAC controls who can use the Kubernetes API; it does not stop pods talking to each other. Test before any policy: from the prober pod, `socket.create_connection(('postgres',5432),3)` printed `connected`, so any pod can reach Postgres. Next: apply a policy allowing only `mlflow` pods, repeat the test, and confirm k3s actually enforces it (PLAN.md warned it might not).
+**7b, NetworkPolicy** (`k8s/60-networkpolicy.yaml`): RBAC controls who can use the Kubernetes API; it does not stop pods talking to each other. Test before any policy: from the prober pod, `socket.create_connection(('postgres',5432),3)` printed `connected`, so any pod can reach Postgres. Predicted: with the policy, the prober gets "connection refused" immediately; without enforcement it would still print `connected`. Result: **refused almost immediately** (`ConnectionRefusedError: [Errno 111]`), so k3s enforces NetworkPolicy here (its built-in network policy controller). My own hint that policies usually drop packets and the connection hangs until the timeout was wrong for this plugin: it rejects, so the failure is instant. `rollout restart deploy/mlflow` afterwards came back healthy (`Application startup complete`, `/health` 200), so the allowed path (mlflow to Postgres) still works.
+
+Lessons:
+
+1. A NetworkPolicy that selects a pod switches that pod to "deny incoming except what is listed"; pods the policy does not select stay open. Without any policy, everything can reach everything.
+2. `from: podSelector` alone matches pods in the same namespace only, so other namespaces are refused too.
+3. Test a policy with both a negative (a pod that must be blocked) and a positive (a pod that must still work). A refusal alone cannot tell "blocked by policy" from "service down".
+4. Refused (instant) versus timed out (hangs) points to the mechanism: a reject, or nothing listening, versus a silent drop. Egress is not restricted by this policy.
+5. Positive control: `exec deploy/mlflow` to Postgres printed `connected`, so the allowed path works.
+
+**7c, API audit logging** (stretch). Policy `k8s/audit/audit-policy.yaml`: no health checks, events or leases; Secrets and ConfigMaps at Metadata level (who touched them, never the content); no routine reads; Metadata for everything else (writes, deletes, impersonation, refused requests). k3s settings `k8s/audit/k3s-config.yaml` (log path, policy file, 7 days, 3 backups, 50 MB). Starting state: no `/etc/rancher/k3s/config.yaml`, the service starts as plain `server` with no flags, no `logs` folder.
+
+Predictions: (1) the refused delete as `ml-reader` records both identities, my admin account as the caller and `ml-reader` in `impersonatedUser`; (2) reading the Postgres password does not put the password in the record; (3) the refused delete is in the log even though nothing was deleted. Actual: ___
+
+Secrets: `get secret` printed the Postgres password in clear text (`change-me-lab-only`): a Kubernetes Secret is only base64, so anyone allowed to `get secrets` reads it. That is why `ml-deployer` has no rule for Secrets. A real platform would use a secrets manager (Vault or a cloud one) with the External Secrets Operator, or sealed secrets in git, plus encryption at rest.
+
+
 
 
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->

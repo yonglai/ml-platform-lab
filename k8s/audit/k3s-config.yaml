@@ -1,0 +1,8 @@
+# Copy to /etc/rancher/k3s/config.yaml on the k3s host, then: sudo systemctl restart k3s
+# Rollback: sudo rm /etc/rancher/k3s/config.yaml && sudo systemctl restart k3s
+kube-apiserver-arg:
+  - audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log
+  - audit-policy-file=/var/lib/rancher/k3s/server/audit.yaml
+  - audit-log-maxage=7        # delete log files older than 7 days
+  - audit-log-maxbackup=3     # keep at most 3 rotated files
+  - audit-log-maxsize=50      # rotate when the file reaches 50 MB

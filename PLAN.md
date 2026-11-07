@@ -60,7 +60,7 @@ Install with Helm (`prometheus-community/prometheus`, `grafana/grafana`) in a `m
 Write `k8s/50-rbac.yaml`: ServiceAccounts `ml-reader` (get/list/watch on pods, deployments, services) and `ml-deployer` (adds patch/update on deployments, create on rollouts) via Role + RoleBinding in `ml-platform`.
 - **Verify:** `kubectl auth can-i delete pods -n ml-platform --as=system:serviceaccount:ml-platform:ml-reader` (expect no) and the same for `ml-deployer` on `patch deployments` (expect yes).
 - **Stretch:** API server audit logging on k3s (audit policy file + apiserver args, then restart k3s). Note it in LOG.md either way.
-- Also write down: Secrets handling, NetworkPolicy to restrict who reaches Postgres (k3s default flannel does not enforce NetworkPolicy unless the controller is enabled; check before claiming it works).
+- Also write down: Secrets handling, NetworkPolicy to restrict who reaches Postgres (`k8s/60-networkpolicy.yaml`; tested: k3s enforces it by default and refuses other pods instantly, see LOG.md).
 
 ### Step 8: Reference architecture doc (2 h, do not skip)
 Fill in `docs/reference-architecture.md`. This is the artifact that answers "define the reference architectures and standards," and the thing to walk through in an interview.
