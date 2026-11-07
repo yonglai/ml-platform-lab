@@ -27,7 +27,7 @@ A thin-slice ML platform on a single-node k3s cluster, built to practice the pie
 | 4 | Promotion gate + model CI | done (gate rejects a worse model; CI check committed) |
 | 5 | Serving from `@prod` | done (rolling update and rollback tested, 0 failed requests) |
 | 6 | Prometheus + Grafana + SLO | done (prober, dashboard, SLO draft, alert tested) |
-| 7 | RBAC (+ audit log stretch) | todo |
+| 7 | RBAC, NetworkPolicy, API audit log | done (roles tested, Postgres locked to mlflow, audit records verified) |
 | 8 | Reference architecture doc | skeleton in `docs/` |
 
 The hour-by-hour plan is in [PLAN.md](PLAN.md). The lab notebook is [LOG.md](LOG.md).

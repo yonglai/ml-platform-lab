@@ -314,7 +314,15 @@ Lessons:
 
 **7c, API audit logging** (stretch). Policy `k8s/audit/audit-policy.yaml`: no health checks, events or leases; Secrets and ConfigMaps at Metadata level (who touched them, never the content); no routine reads; Metadata for everything else (writes, deletes, impersonation, refused requests). k3s settings `k8s/audit/k3s-config.yaml` (log path, policy file, 7 days, 3 backups, 50 MB). Starting state: no `/etc/rancher/k3s/config.yaml`, the service starts as plain `server` with no flags, no `logs` folder.
 
-Predictions: (1) the refused delete as `ml-reader` records both identities, my admin account as the caller and `ml-reader` in `impersonatedUser`; (2) reading the Postgres password does not put the password in the record; (3) the refused delete is in the log even though nothing was deleted. Actual: ___
+Predictions: (1) the refused delete as `ml-reader` records both identities, my admin account as the caller and `ml-reader` in `impersonatedUser`; (2) reading the Postgres password does not put the password in the record; (3) the refused delete is in the log even though nothing was deleted. Actual: all three correct. Applied with `sudo cp` of the policy to `/var/lib/rancher/k3s/server/audit.yaml` and the config to `/etc/rancher/k3s/config.yaml`, then `sudo systemctl restart k3s`; node `Ready` within a minute and no pod restarted (restart counts unchanged). The refused delete is in `/var/lib/rancher/k3s/server/logs/audit.log` as one record: `user` = `system:admin` (group `system:masters`), `impersonatedUser` = `system:serviceaccount:ml-platform:ml-reader`, `verb` delete, `objectRef` the prober pod, `decision: forbid`, `code: 403`. The Secret read is recorded (`get secrets/postgres-credentials`, code 200, `decision: allow`, source 127.0.0.1) with no content; searching the whole log for the password text found 0 matches.
+
+Lessons:
+
+1. Metadata level records who and what, not the content: right for Secrets, because an audit log that contained the password would itself leak it.
+2. Impersonation (`--as`) is visible: the real caller and the identity they pretended to be are both recorded.
+3. `system:admin` is in `system:masters`, which RBAC never refuses. My RBAC tests worked only because I impersonated; for that account the audit log is the only control.
+4. The log is on the same machine it protects: anyone with root on the host could edit it. Real setups ship audit logs off the box.
+5. A bad audit policy can stop the API server from starting. Safe order: inspect, copy the config, restart, keep the rollback (`sudo rm /etc/rancher/k3s/config.yaml` and restart).
 
 Secrets: `get secret` printed the Postgres password in clear text (`change-me-lab-only`): a Kubernetes Secret is only base64, so anyone allowed to `get secrets` reads it. That is why `ml-deployer` has no rule for Secrets. A real platform would use a secrets manager (Vault or a cloud one) with the External Secrets Operator, or sealed secrets in git, plus encryption at rest.
 
