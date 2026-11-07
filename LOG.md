@@ -148,4 +148,43 @@ Rollback check (move `prod` back to v2 with `set_registered_model_alias`, then f
 
 **Done**: the gate behaved correctly in both directions on the cluster (promote on improvement, reject on regression with exit 1), and `prod` ended on v4.
 
+## 2026-11-06 - Step 5, serving from @prod
+
+Built `k8s/30-serving.yaml`: a Deployment and a ClusterIP Service (port 5001) that serve the model behind the `prod` alias. Image `python:3.12-slim`; at start the container runs `pip install` with the versions pinned from `uv.lock` (mlflow 3.18.0, scikit-learn 1.9.1, pandas 3.1.0, numpy 2.5.4, scipy 1.18.1, skops 0.16.0), asks the registry which version `prod` is, prints `resolved propensity-model@prod -> v<N>`, then serves that exact version with `mlflow models serve` (1 worker, `--env-manager local`).
+
+**Design decisions**
+
+- Resolve the alias once, then serve a fixed version number. The log line always says which version the pod serves, and a running pod never switches versions when someone moves the alias.
+- Pin the libraries to the versions the model was trained with. The training run recorded my whole `uv.lock` (91 packages) as the model's requirements, and a model saved with one scikit-learn version may fail under another.
+- `RollingUpdate` with `maxSurge: 1` and `maxUnavailable: 0`: the old pod stays until the new one is Ready.
+- Probes on `/ping`: `startupProbe` (up to 5 minutes), `readinessProbe`, `livenessProbe`. Requests 512Mi / limit 1536Mi (set high on purpose after the Step 2 OOM kills; to be sized from measurements).
+
+**Predictions vs results**
+
+- How long until Ready, what takes the time, and which probe protects the pod? Predicted: downloading the model and preparing it for serving; the `startupProbe`. Actual: 50 s to `1/1`. What dominated: not measured; my guess is the `pip install`, as in Step 2.
+- Promote a different version while the pod runs: does the running pod change, and what picks up the change? Predicted: no, the change is picked up when a new pod starts. Actual: not tested yet (to test with `kubectl rollout restart deploy/serving`). Related observation: `prod` was on v2 at that moment (I had moved it back by hand in Step 4), and the new pod resolved v2.
+- Memory of the serving pod (one worker)? Predicted: about 900Mi, roughly 300 Mi per worker. Actual: 454Mi (`kubectl top pod`; at the same time mlflow 666Mi, postgres 76Mi). Too high a guess: per heavy process it is about 225Mi, not 300.
+- Will the Host header check allow the model fetch from `mlflow:5000`? Predicted: yes. Actual: yes. No 403 in the serving log; the model downloaded from `mlflow:5000` and Uvicorn started.
+
+**Baseline latency** (`app/smoke.py -n 200` through `kubectl port-forward svc/serving 5001:5001`): p50 15.9 ms, p95 17.5 ms, p99 25.5 ms (mean 16.1 ms). This overstates in-cluster latency: the same script against a local server gave about 5 ms, so `kubectl port-forward` adds roughly 10 ms. Redo from a pod inside the cluster before using it as the SLO baseline.
+
+**What went wrong**: nothing failed; the first `kubectl apply` came up Ready.
+
+**Lessons**
+
+1. Memory is roughly the number of heavy Python processes times about 225Mi each: mlflow 666Mi / 3 processes (parent + 2 workers), serving 454Mi / 2 (parent + 1 worker). The model itself is a few MB, so the imported libraries dominate; for an LLM the weights would dominate instead. (The process count for serving is my expectation, not yet checked with the `/proc` listing.)
+2. `kubectl port-forward` is not a valid latency baseline: it tunnels through the API server and adds latency.
+3. The pod serves the version `prod` pointed to when it started (v2), and the log line `resolved propensity-model@prod -> v2` records it.
+4. `mlflow` (3 restarts) and `postgres-0` (4 restarts) both show their last restart about 8 hours ago, at the same time. Probably a host event (sleep, reboot or k3s restart); not confirmed. Both recovered on their own, and Postgres kept its data.
+
+**Open questions for the reference architecture doc**
+
+- The alias is resolved only when a pod starts, so rolling out a new `prod` needs a restart, and a pod that crashes and restarts can silently pick up a newer version. Alternatives: pin the version number in the manifest and promote by changing it in Git (GitOps), or a serving layer such as KServe that watches the registry.
+- `pip install` at container start makes every restart slow and depends on the network; a real setup builds an image once and pushes it to a registry.
+- One replica means no redundancy: a rollout is the only time two pods exist.
+
+**To verify next**: promote a version, run `kubectl -n ml-platform rollout restart deploy/serving`, and check there are no failed requests during the rollout. Test it with a request loop run from a pod inside the cluster against `http://serving:5001/ping`, not through `kubectl port-forward`, which attaches to one pod and breaks when that pod is replaced.
+
+**Done**: the serving pod is Ready (50 s), serves `prod` (v2) behind the `serving` Service, and returns predictions. The rollout test (promote, restart, no failed requests) is still to do.
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
