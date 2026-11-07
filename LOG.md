@@ -121,7 +121,7 @@ Ran `app/promote.py` against the cluster registry (`MLFLOW_TRACKING_URI=http://l
 | `train.py --n-estimators 300 --max-depth 10` | v4, roc_auc 0.9676 | v4 gets `candidate` |
 | `promote.py` | `promoting v4 (0.9676) over prod v2 (0.9575)`, exit 0 | v4: candidate, prod; v1-v3 no aliases |
 
-Rollback check (move `prod` back to v2 with `set_registered_model_alias`, then forward to v4 again): result ___ (fill in).
+Rollback check: moved `prod` from v4 back to v2 with `set_registered_model_alias`. Afterwards `show_registry.py` showed v2: `prod` and v4: `candidate` (v4, roc_auc 0.9676, is better than v2, 0.9575), and the serving pod later resolved v2. I have not moved `prod` forward again yet; that is the next promotion.
 
 **Predictions vs results**
 
@@ -162,7 +162,7 @@ Built `k8s/30-serving.yaml`: a Deployment and a ClusterIP Service (port 5001) th
 **Predictions vs results**
 
 - How long until Ready, what takes the time, and which probe protects the pod? Predicted: downloading the model and preparing it for serving; the `startupProbe`. Actual: 50 s to `1/1`. What dominated: not measured; my guess is the `pip install`, as in Step 2.
-- Promote a different version while the pod runs: does the running pod change, and what picks up the change? Predicted: no, the change is picked up when a new pod starts. Actual: not tested yet (to test with `kubectl rollout restart deploy/serving`). Related observation: `prod` was on v2 at that moment (I had moved it back by hand in Step 4), and the new pod resolved v2.
+- Promote a different version while the pod runs: does the running pod change, and what picks up the change? Predicted: no, the change is picked up when a new pod starts. Actual: confirmed in the rollout test below. Related observation: `prod` was on v2 at that moment (I had moved it back by hand in Step 4), and the new pod resolved v2.
 - Memory of the serving pod (one worker)? Predicted: about 900Mi, roughly 300 Mi per worker. Actual: 454Mi (`kubectl top pod`; at the same time mlflow 666Mi, postgres 76Mi). Too high a guess: per heavy process it is about 225Mi, not 300.
 - Will the Host header check allow the model fetch from `mlflow:5000`? Predicted: yes. Actual: yes. No 403 in the serving log; the model downloaded from `mlflow:5000` and Uvicorn started.
 
@@ -183,8 +183,37 @@ Built `k8s/30-serving.yaml`: a Deployment and a ClusterIP Service (port 5001) th
 - `pip install` at container start makes every restart slow and depends on the network; a real setup builds an image once and pushes it to a registry.
 - One replica means no redundancy: a rollout is the only time two pods exist.
 
-**To verify next**: promote a version, run `kubectl -n ml-platform rollout restart deploy/serving`, and check there are no failed requests during the rollout. Test it with a request loop run from a pod inside the cluster against `http://serving:5001/ping`, not through `kubectl port-forward`, which attaches to one pod and breaks when that pod is replaced.
+**To verify next (done, see Rollout test)**: promote a version, run `kubectl -n ml-platform rollout restart deploy/serving`, and check there are no failed requests during the rollout. Test it with a request loop run from a pod inside the cluster against `http://serving:5001/ping`, not through `kubectl port-forward`, which attaches to one pod and breaks when that pod is replaced.
 
-**Done**: the serving pod is Ready (50 s), serves `prod` (v2) behind the `serving` Service, and returns predictions. The rollout test (promote, restart, no failed requests) is still to do.
+**Done**: the serving pod is Ready (50 s), serves `prod` (v2) behind the `serving` Service, and returns predictions. The rollout test passed (see below).
+
+**Rollout test** (2026-11-06)
+
+Setup: a `loadgen` pod ran a request loop against `http://serving:5001` from inside the cluster, printing success and failure counters. Then I moved `prod` to v4 (roc_auc 0.9676) and ran `kubectl rollout restart deploy/serving`.
+
+Predictions vs results (all four correct):
+
+- The running pod keeps serving its old version until it is replaced. Correct.
+- A new pod resolves `prod` at start and serves the new version. Correct (v4).
+- The old pod stays until the new pod is Ready (`maxUnavailable: 0`), so no requests fail. Correct: **0 failures in 1,100+ requests**.
+- The new pod takes about as long as the first start. Correct: **50 s from creation to Ready**.
+
+Rollback: set `prod` back to v2, then `time (kubectl rollout restart ... && kubectl rollout status ...)`. Result: **51.0 s** total. The pod log shows `resolved propensity-model@prod -> v2`, and `show_registry.py` shows `prod` on v2 and `candidate` still on v4. Rolling back is two steps: move the alias, restart the pods. It takes about a minute, so it is not instant.
+
+Timeline from `kubectl get events` (rollback rollout): new pod started at T; startup probe failed (`connection refused`) at T+40 s because `pip install` was still running; old pod killed at T+50 s. The old pod is only stopped after the new one passes its probe.
+
+Lessons:
+
+1. `kubectl logs -l <selector>` shows only the last 10 lines per pod unless `--tail=-1` is set. My first `grep resolved` came back empty for that reason, not because the line was missing.
+2. A `connection refused` startup-probe warning during startup is normal; the startup probe tolerates up to 300 s of them.
+3. Zero-downtime depends on the old pod staying until the new one is Ready. With a single replica, a rollout is the only time two pods exist.
+
+Open questions:
+
+- The old pod ended in status `Error` (non-zero exit) after SIGTERM instead of `Completed`. Is `mlflow models serve` exiting with a non-zero code on shutdown? Check `kubectl describe pod` Last State and the exit code on the next rollout.
+- Graceful shutdown under higher load: would in-flight requests be dropped when the old pod stops? Test with a faster loop and a `preStop` sleep.
+- Where do the 50 s go: `pip install`, model download, or server start? Add timestamps to the startup log.
+
+**Done**: promote, restart and rollback all work through the alias. Step 5 is complete.
 
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->
