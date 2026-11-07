@@ -216,4 +216,20 @@ Open questions:
 
 **Done**: promote, restart and rollback all work through the alias. Step 5 is complete.
 
+## 2026-11-07 - Step 6, Prometheus, Grafana and SLO
+
+Goal: see the platform from the outside: latency, success rate, pod memory, restarts, and write an SLO from real numbers.
+
+**Design decision**: `mlflow models serve` exposes no request-latency metrics, so there is nothing to scrape for latency. Plan: a small "prober" pod inside the cluster sends one request per second to `serving` and exposes a latency histogram and a success counter on `/metrics`. This also replaces the `port-forward` latency baseline from Step 5. Pod CPU/memory/restarts come from cAdvisor (built into the kubelet) and kube-state-metrics. Alertmanager, pushgateway and node-exporter are switched off.
+
+Sub-steps: 6a check the host, 6b Prometheus, 6c prober, 6d Grafana dashboard, 6e SLO and one alert rule.
+
+**6a, host check**: Helm v4.3.0. Host has 32 GB RAM, about 26 GB available; node memory 39% used (12.6 GB), CPU 9%. No resource problem for monitoring.
+
+**Predictions**
+
+- Prometheus with no PVC, pod deleted: does history survive? Predicted: yes. Actual: ___
+- Prober p99 from inside the cluster vs 25.5 ms through `port-forward`? Predicted: below, because there is no `port-forward` hop. Actual: ___
+- Memory added by Prometheus plus Grafana? Predicted: under 500Mi. Actual: ___
+
 <!-- New entries go ABOVE this line, newest last. Keep it chronological. -->

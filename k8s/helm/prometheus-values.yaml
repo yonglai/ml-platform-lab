@@ -1,0 +1,30 @@
+# Values for prometheus-community/prometheus, release name "prometheus",
+# namespace "monitoring". Kept small on purpose: one node, one server.
+
+# Not needed for this lab: no alert routing yet, no push jobs, no host metrics.
+alertmanager:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+
+# Kept: reports pod readiness and restart counts (used for the alert in 6e).
+kube-state-metrics:
+  enabled: true
+
+server:
+  retention: 7d
+  global:
+    scrape_interval: 15s
+  # Step 6b experiment: start WITHOUT a volume to test the "does history
+  # survive pod deletion" prediction, then switch this to true and upgrade.
+  persistentVolume:
+    enabled: false
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
