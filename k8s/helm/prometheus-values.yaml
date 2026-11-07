@@ -17,10 +17,10 @@ server:
   retention: 7d
   global:
     scrape_interval: 15s
-  # Step 6b experiment: start WITHOUT a volume to test the "does history
-  # survive pod deletion" prediction, then switch this to true and upgrade.
+  # History lives on a 5Gi local-path volume, so it survives pod deletion.
+  # (Step 6b first ran with enabled: false to test that; history was lost.)
   persistentVolume:
-    enabled: false
+    enabled: true
     size: 5Gi
   resources:
     requests:
