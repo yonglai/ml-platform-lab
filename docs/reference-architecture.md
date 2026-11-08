@@ -3,7 +3,23 @@
 *Replace every italic prompt with your own text. Aim for 2 pages. Write it as if the audience is engineering leadership who must approve a multi-quarter roadmap.*
 
 ## 1. Context and goals
-*Who are the users (data scientists, app teams)? What must the platform guarantee? Three bullet goals, three non-goals.*
+*Draft: rewrite each sentence in your own words.*
+
+**Users.** Data scientists and ML engineers who train and register models; product and engineering teams who call predictions from their applications; and the engineer on call who keeps it running. What they share: they need to ship a model change without breaking the product, know what is running, and undo a change quickly.
+
+**Why a platform.** Without one, a model reaches production by hand: nobody can say which version is serving, a bad model is hard to roll back, and nobody can show who changed what. In healthcare software, where predictions feed clinical and operational decisions, each of those is a safety and audit problem, not just an outage.
+
+**Goals: what users can count on**
+1. **Predictions are fast.** Objective: p99 under 50 ms. Measured from inside the cluster: p50 about 17.5 ms, p99 at most 20 ms; the model itself is about 11 ms of that.
+2. **A release or a rollback does not drop requests.** 0 failed requests out of 1,100+ during a rolling update, because the old pod stays until the new one is Ready; a rollback (move the alias, restart) takes 51 s.
+3. **Failures are caught and bounded.** An alert fires about 2 minutes after serving goes down; one 6-minute outage cost 372 failed requests, 5.7% of the monthly error budget.
+
+**Non-goals (for now)**
+1. **Multi-node high availability.** One node, and planned downtime is accepted (the host is shut down nightly); outages are measured against the error budget instead of prevented.
+2. **Building the models.** The platform ships, serves and watches models; model quality belongs to the data scientists. The small synthetic model here only exercises the platform.
+3. **Cloud parity.** The lab runs on k3s. Managed options (Azure ML and others) are compared in section 3 and tried in a later phase, not rebuilt.
+
+**Not covered yet, and said plainly:** monitoring of model quality and data drift (planned), a feature store, and compliance controls beyond access control, network isolation and audit logging.
 
 ## 2. Architecture
 *Paste the diagram from README and explain the path of one model from training to production traffic.*
