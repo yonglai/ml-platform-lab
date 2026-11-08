@@ -28,7 +28,7 @@ A thin-slice ML platform on a single-node k3s cluster, built to practice the pie
 | 5 | Serving from `@prod` | done (rolling update and rollback tested, 0 failed requests) |
 | 6 | Prometheus + Grafana + SLO | done (prober, dashboard, SLO draft, alert tested) |
 | 7 | RBAC, NetworkPolicy, API audit log | done (roles tested, Postgres locked to mlflow, audit records verified) |
-| 8 | Reference architecture doc | skeleton in `docs/` |
+| 8 | Reference architecture doc | first full draft in `docs/reference-architecture.md` (to be reviewed and edited) |
 
 The hour-by-hour plan is in [PLAN.md](PLAN.md). The lab notebook is [LOG.md](LOG.md).
 
